@@ -15,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/olusolaa/lokilens/internal/lokimcp/audit"
+	"github.com/olusolaa/lokilens/internal/lokimcp/awsread"
 	"github.com/olusolaa/lokilens/internal/lokimcp/cloudflare"
 	"github.com/olusolaa/lokilens/internal/lokimcp/grafana"
 	"github.com/olusolaa/lokilens/internal/lokimcp/loki"
@@ -31,6 +32,7 @@ type serverConfig struct {
 	traceSource   *tempo.Source
 	grafanaSrc    *grafana.Source
 	cloudflareSrc *cloudflare.Source
+	awsSrc        *awsread.Source
 }
 
 // WithMetrics registers Prometheus metric tools. Passing a nil source is a
@@ -45,6 +47,10 @@ func WithGrafana(src *grafana.Source) Option {
 
 func WithCloudflare(src *cloudflare.Source) Option {
 	return func(c *serverConfig) { c.cloudflareSrc = src }
+}
+
+func WithAWS(src *awsread.Source) Option {
+	return func(c *serverConfig) { c.awsSrc = src }
 }
 
 func WithTraces(src *tempo.Source) Option {
@@ -173,6 +179,26 @@ func NewServer(logSource *loki.Source, piiFilter *safety.PIIFilter, auditLogger 
 			}, nil
 		})
 		registerCloudflareTools(s, cloudflareSrc, h)
+	}
+	if awsSrc := cfg.awsSrc; awsSrc != nil {
+		s.AddPrompt(mcp.Prompt{
+			Name:        "aws-read-guide",
+			Description: "Guide for read-only AWS CLI inspection of EC2, ELBv2, Auto Scaling, CodeDeploy and Route 53.",
+		}, func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return &mcp.GetPromptResult{
+				Description: "Read-only AWS inspection patterns",
+				Messages: []mcp.PromptMessage{
+					{
+						Role: mcp.RoleUser,
+						Content: mcp.TextContent{
+							Type: "text",
+							Text: awsSrc.Instruction(),
+						},
+					},
+				},
+			}, nil
+		})
+		registerAWSTools(s, awsSrc, h)
 	}
 
 	return s
@@ -809,4 +835,29 @@ func intArg(args map[string]any, key string) int {
 		return v
 	}
 	return 0
+}
+
+func registerAWSTools(s *server.MCPServer, src *awsread.Source, h *mcpHandlers) {
+	handlers := src.Handlers()
+
+	s.AddTool(
+		mcp.NewTool("aws_read",
+			mcp.WithDescription("Run a read-only AWS CLI describe/list/get/batch-get operation against EC2, ELBv2, Auto Scaling, CodeDeploy or Route 53 and return the parsed JSON. Use filters and MaxResults/MaxRecords to keep output small. User data, console output and secrets are blocked."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("service", mcp.Required(), mcp.Enum(awsread.Services()...), mcp.Description("AWS CLI service name")),
+			mcp.WithString("operation", mcp.Required(), mcp.Description("AWS CLI kebab-case operation, e.g. describe-instances, describe-target-health, list-deployments")),
+			mcp.WithObject("params", mcp.Description("Request fields as a JSON object (CLI input JSON, PascalCase keys), e.g. {\"Filters\":[{\"Name\":\"tag:Name\",\"Values\":[\"lokilens-0\"]}]}")),
+			mcp.WithString("region", mcp.Description("AWS region, e.g. eu-west-1. Defaults to the server's configured region")),
+		),
+		h.wrap(func(ctx context.Context, args map[string]any) (any, error) {
+			return handlers.AWSRead(ctx, awsread.ReadInput{
+				Service:   stringArg(args, "service"),
+				Operation: stringArg(args, "operation"),
+				Params:    args["params"],
+				Region:    stringArg(args, "region"),
+			})
+		}),
+	)
+
+	h.logger.Info("registered AWS MCP tools", "count", 1)
 }

@@ -36,6 +36,10 @@ type Config struct {
 	CloudflareTimeout      time.Duration
 	CloudflareMaxRetries   int
 	CloudflareMaxTimeRange time.Duration
+	AWSReadEnabled         bool
+	AWSReadCLIPath         string
+	AWSReadRegion          string
+	AWSReadTimeout         time.Duration
 
 	GrafanaURL                 string
 	GrafanaToken               string
@@ -77,6 +81,10 @@ func LoadMCP() (*Config, error) {
 		CloudflareTimeout:      envDuration("CLOUDFLARE_TIMEOUT", 30*time.Second),
 		CloudflareMaxRetries:   envInt("CLOUDFLARE_MAX_RETRIES", 2),
 		CloudflareMaxTimeRange: envDuration("CLOUDFLARE_MAX_TIME_RANGE", 168*time.Hour),
+		AWSReadEnabled:         envBool("AWS_READ_ENABLED", false),
+		AWSReadCLIPath:         envOrDefault("AWS_READ_CLI_PATH", "aws"),
+		AWSReadRegion:          envOrDefault("AWS_READ_REGION", "eu-west-1"),
+		AWSReadTimeout:         envDuration("AWS_READ_TIMEOUT", 30*time.Second),
 
 		GrafanaURL:             strings.TrimRight(os.Getenv("GRAFANA_URL"), "/"),
 		GrafanaToken:           os.Getenv("GRAFANA_TOKEN"),
@@ -121,8 +129,8 @@ func LoadMCP() (*Config, error) {
 	}
 	cfg.CloudflareZones = zones
 
-	if cfg.LokiBaseURL == "" && cfg.PromBaseURL == "" && cfg.TempoBaseURL == "" && !cfg.GrafanaEnabled() && !cfg.CloudflareEnabled() {
-		return nil, fmt.Errorf("at least one backend required: set LOKI_BASE_URL, PROM_BASE_URL, TEMPO_BASE_URL, GRAFANA_URL with a datasource UID and/or CLOUDFLARE_API_TOKEN with CLOUDFLARE_ZONES")
+	if cfg.LokiBaseURL == "" && cfg.PromBaseURL == "" && cfg.TempoBaseURL == "" && !cfg.GrafanaEnabled() && !cfg.CloudflareEnabled() && !cfg.AWSReadEnabled {
+		return nil, fmt.Errorf("at least one backend required: set LOKI_BASE_URL, PROM_BASE_URL, TEMPO_BASE_URL, GRAFANA_URL with a datasource UID , CLOUDFLARE_API_TOKEN with CLOUDFLARE_ZONES, and/or AWS_READ_ENABLED=true")
 	}
 
 	return cfg, nil
@@ -221,6 +229,15 @@ func envInt(key string, defaultVal int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return defaultVal
+}
+
+func envBool(key string, defaultVal bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return defaultVal
