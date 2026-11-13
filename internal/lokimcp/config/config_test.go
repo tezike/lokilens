@@ -3,11 +3,12 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"LOKI_BASE_URL", "PROM_BASE_URL", "PROM_MAX_POINTS"} {
+	for _, k := range []string{"LOKI_BASE_URL", "PROM_BASE_URL", "PROM_MAX_POINTS", "AWS_READ_ENABLED", "AWS_READ_CLI_PATH", "AWS_READ_REGION", "AWS_READ_TIMEOUT"} {
 		os.Unsetenv(k)
 	}
 }
@@ -41,6 +42,34 @@ func TestLoadMCP_LokiOnlyStillValid(t *testing.T) {
 	defer os.Unsetenv("LOKI_BASE_URL")
 	if _, err := LoadMCP(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadMCP_AWSReadDefaults(t *testing.T) {
+	clearEnv(t)
+	os.Setenv("LOKI_BASE_URL", "http://localhost:3100")
+	defer os.Unsetenv("LOKI_BASE_URL")
+	cfg, err := LoadMCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AWSReadEnabled || cfg.AWSReadCLIPath != "aws" || cfg.AWSReadRegion != "eu-west-1" || cfg.AWSReadTimeout != 30*time.Second {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+}
+
+func TestLoadMCP_AWSReadOnlyIsValid(t *testing.T) {
+	clearEnv(t)
+	os.Setenv("AWS_READ_ENABLED", "true")
+	os.Setenv("AWS_READ_REGION", "eu-central-1")
+	os.Setenv("AWS_READ_TIMEOUT", "5s")
+	defer clearEnv(t)
+	cfg, err := LoadMCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AWSReadEnabled || cfg.AWSReadRegion != "eu-central-1" || cfg.AWSReadTimeout != 5*time.Second {
+		t.Fatalf("cfg = %+v", cfg)
 	}
 }
 

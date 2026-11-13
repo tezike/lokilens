@@ -30,6 +30,11 @@ type Config struct {
 	TempoTimeout    time.Duration
 	TempoMaxRetries int
 
+	AWSReadEnabled bool
+	AWSReadCLIPath string
+	AWSReadRegion  string
+	AWSReadTimeout time.Duration
+
 	GrafanaURL                 string
 	GrafanaToken               string
 	GrafanaTimeout             time.Duration
@@ -66,6 +71,11 @@ func LoadMCP() (*Config, error) {
 		TempoTimeout:    envDuration("TEMPO_TIMEOUT", 60*time.Second),
 		TempoMaxRetries: envInt("TEMPO_MAX_RETRIES", 2),
 
+		AWSReadEnabled: envBool("AWS_READ_ENABLED", false),
+		AWSReadCLIPath: envOrDefault("AWS_READ_CLI_PATH", "aws"),
+		AWSReadRegion:  envOrDefault("AWS_READ_REGION", "eu-west-1"),
+		AWSReadTimeout: envDuration("AWS_READ_TIMEOUT", 30*time.Second),
+
 		GrafanaURL:             strings.TrimRight(os.Getenv("GRAFANA_URL"), "/"),
 		GrafanaToken:           os.Getenv("GRAFANA_TOKEN"),
 		GrafanaTimeout:         envDuration("GRAFANA_TIMEOUT", 120*time.Second),
@@ -93,8 +103,8 @@ func LoadMCP() (*Config, error) {
 	}
 	cfg.GrafanaPostgresDatasources = datasources
 
-	if cfg.LokiBaseURL == "" && cfg.PromBaseURL == "" && cfg.TempoBaseURL == "" && !cfg.GrafanaEnabled() {
-		return nil, fmt.Errorf("at least one backend required: set LOKI_BASE_URL, PROM_BASE_URL, TEMPO_BASE_URL and/or GRAFANA_URL with a datasource UID")
+	if cfg.LokiBaseURL == "" && cfg.PromBaseURL == "" && cfg.TempoBaseURL == "" && !cfg.GrafanaEnabled() && !cfg.AWSReadEnabled {
+		return nil, fmt.Errorf("at least one backend required: set LOKI_BASE_URL, PROM_BASE_URL, TEMPO_BASE_URL, GRAFANA_URL with a datasource UID and/or AWS_READ_ENABLED=true")
 	}
 
 	return cfg, nil
@@ -164,6 +174,15 @@ func envInt(key string, defaultVal int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return defaultVal
+}
+
+func envBool(key string, defaultVal bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return defaultVal

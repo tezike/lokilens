@@ -29,6 +29,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/olusolaa/lokilens/internal/lokimcp/audit"
+	"github.com/olusolaa/lokilens/internal/lokimcp/awsread"
 	"github.com/olusolaa/lokilens/internal/lokimcp/config"
 	"github.com/olusolaa/lokilens/internal/lokimcp/grafana"
 	"github.com/olusolaa/lokilens/internal/lokimcp/loki"
@@ -90,6 +91,11 @@ func main() {
 		traceSource = tempo.NewSource(tempoClient, cfg.MaxTimeRange, auditLogger)
 	}
 
+	var awsSource *awsread.Source
+	if cfg.AWSReadEnabled {
+		awsSource = awsread.NewSource(awsread.ExecRunner{Timeout: cfg.AWSReadTimeout}, cfg.AWSReadCLIPath, cfg.AWSReadRegion, auditLogger)
+	}
+
 	var grafanaSource *grafana.Source
 	if cfg.GrafanaEnabled() {
 		grafanaClient := grafana.NewHTTPClient(grafana.ClientConfig{
@@ -145,6 +151,14 @@ func main() {
 			logger.Info("grafana backend connected", "backend", grafanaSource.Name())
 		}
 	}
+	if awsSource != nil {
+		if err := awsSource.HealthCheck(checkCtx); err != nil {
+			logger.Warn("aws backend health check failed", "backend", awsSource.Name(), "error", err)
+		} else {
+			healthy++
+			logger.Info("aws backend connected", "backend", awsSource.Name())
+		}
+	}
 	checkCancel()
 	if healthy == 0 {
 		log.Fatalf("no backend is reachable; aborting")
@@ -152,7 +166,7 @@ func main() {
 
 	// Create and run the MCP server over stdio.
 	piiFilter := safety.NewPIIFilter()
-	mcpServer := mcppkg.NewServer(logSource, piiFilter, auditLogger, logger, mcppkg.WithMetrics(metricSource), mcppkg.WithTraces(traceSource), mcppkg.WithGrafana(grafanaSource))
+	mcpServer := mcppkg.NewServer(logSource, piiFilter, auditLogger, logger, mcppkg.WithMetrics(metricSource), mcppkg.WithTraces(traceSource), mcppkg.WithGrafana(grafanaSource), mcppkg.WithAWS(awsSource))
 	stdio := server.NewStdioServer(mcpServer)
 	stdio.SetErrorLogger(log.New(os.Stderr, "mcp: ", log.LstdFlags))
 
